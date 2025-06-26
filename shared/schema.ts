@@ -35,6 +35,7 @@ export const habitEntries = pgTable("habit_entries", {
   duration: integer("duration"), // in minutes, only for check-out
   device: text("device"),
   notes: text("notes"),
+  voiceNoteUrl: text("voice_note_url"), // URL to stored voice note
   userId: integer("user_id").notNull(),
 });
 

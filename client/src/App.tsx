@@ -9,6 +9,7 @@ import Log from "@/pages/log";
 import Cards from "@/pages/cards";
 import Settings from "@/pages/settings";
 import FloatingNav from "@/components/floating-nav";
+import FloatingVoiceButton from "@/components/floating-voice-button";
 
 function Router() {
   return (
@@ -39,6 +40,9 @@ function Router() {
 
       {/* Floating Navigation */}
       <FloatingNav />
+      
+      {/* Floating Voice Button */}
+      <FloatingVoiceButton />
     </div>
   );
 }
