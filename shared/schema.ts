@@ -67,6 +67,11 @@ export const insertSettingsSchema = createInsertSchema(settings).omit({
   userId: true,
 });
 
+export const insertUserSchema = createInsertSchema(users).omit({
+  id: true,
+});
+
+export type InsertUser = z.infer<typeof insertUserSchema>;
 export type InsertHabit = z.infer<typeof insertHabitSchema>;
 export type InsertRfidCard = z.infer<typeof insertRfidCardSchema>;
 export type InsertHabitEntry = z.infer<typeof insertHabitEntrySchema>;

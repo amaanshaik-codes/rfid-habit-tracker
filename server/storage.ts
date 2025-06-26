@@ -176,7 +176,7 @@ export class MemStorage implements IStorage {
 
   async createHabit(insertHabit: InsertHabit): Promise<Habit> {
     const id = this.currentId++;
-    const habit: Habit = { ...insertHabit, id };
+    const habit: Habit = { ...insertHabit, id, userId: insertHabit.userId || 1 };
     this.habits.set(id, habit);
     return habit;
   }
