@@ -4,6 +4,8 @@ import {
   type InsertUser, type InsertHabit, type InsertRfidCard, type InsertHabitEntry, type InsertSettings,
   type HabitWithCards, type HabitSummary, type DailyProgress
 } from "@shared/schema";
+import { db } from "./db";
+import { eq, desc, and, gte, lte } from "drizzle-orm";
 
 export interface IStorage {
   // User methods
@@ -420,4 +422,265 @@ export class MemStorage implements IStorage {
   }
 }
 
-export const storage = new MemStorage();
+export class DatabaseStorage implements IStorage {
+  async getUser(id: number): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user || undefined;
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user || undefined;
+  }
+
+  async createUser(insertUser: InsertUser): Promise<User> {
+    const [user] = await db
+      .insert(users)
+      .values(insertUser)
+      .returning();
+    return user;
+  }
+
+  async getHabits(userId: number): Promise<Habit[]> {
+    return await db.select().from(habits).where(eq(habits.userId, userId));
+  }
+
+  async getHabitsWithCards(userId: number): Promise<HabitWithCards[]> {
+    const userHabits = await this.getHabits(userId);
+    const userCards = await this.getRfidCards(userId);
+    
+    return userHabits.map(habit => ({
+      ...habit,
+      cards: userCards.filter(card => card.habitId === habit.id)
+    }));
+  }
+
+  async createHabit(insertHabit: InsertHabit): Promise<Habit> {
+    const [habit] = await db
+      .insert(habits)
+      .values(insertHabit)
+      .returning();
+    return habit;
+  }
+
+  async updateHabit(id: number, updateData: Partial<InsertHabit>): Promise<Habit | undefined> {
+    const [habit] = await db
+      .update(habits)
+      .set(updateData)
+      .where(eq(habits.id, id))
+      .returning();
+    return habit || undefined;
+  }
+
+  async deleteHabit(id: number): Promise<boolean> {
+    const result = await db.delete(habits).where(eq(habits.id, id));
+    return result.rowCount > 0;
+  }
+
+  async getRfidCards(userId: number): Promise<RfidCard[]> {
+    return await db.select().from(rfidCards).where(eq(rfidCards.userId, userId));
+  }
+
+  async getRfidCardByCardId(cardId: string): Promise<RfidCard | undefined> {
+    const [card] = await db.select().from(rfidCards).where(eq(rfidCards.cardId, cardId));
+    return card || undefined;
+  }
+
+  async createRfidCard(insertCard: InsertRfidCard): Promise<RfidCard> {
+    const [card] = await db
+      .insert(rfidCards)
+      .values(insertCard)
+      .returning();
+    return card;
+  }
+
+  async updateRfidCard(id: number, updateData: Partial<InsertRfidCard>): Promise<RfidCard | undefined> {
+    const [card] = await db
+      .update(rfidCards)
+      .set(updateData)
+      .where(eq(rfidCards.id, id))
+      .returning();
+    return card || undefined;
+  }
+
+  async deleteRfidCard(id: number): Promise<boolean> {
+    const result = await db.delete(rfidCards).where(eq(rfidCards.id, id));
+    return result.rowCount > 0;
+  }
+
+  async getHabitEntries(userId: number, limit: number = 50): Promise<HabitEntry[]> {
+    return await db
+      .select()
+      .from(habitEntries)
+      .where(eq(habitEntries.userId, userId))
+      .orderBy(desc(habitEntries.date), desc(habitEntries.time))
+      .limit(limit);
+  }
+
+  async getHabitEntriesForDate(userId: number, date: string): Promise<HabitEntry[]> {
+    return await db
+      .select()
+      .from(habitEntries)
+      .where(and(eq(habitEntries.userId, userId), eq(habitEntries.date, date)))
+      .orderBy(habitEntries.time);
+  }
+
+  async getHabitEntriesForDateRange(userId: number, startDate: string, endDate: string): Promise<HabitEntry[]> {
+    return await db
+      .select()
+      .from(habitEntries)
+      .where(
+        and(
+          eq(habitEntries.userId, userId),
+          gte(habitEntries.date, startDate),
+          lte(habitEntries.date, endDate)
+        )
+      )
+      .orderBy(habitEntries.date, habitEntries.time);
+  }
+
+  async createHabitEntry(insertEntry: InsertHabitEntry): Promise<HabitEntry> {
+    const [entry] = await db
+      .insert(habitEntries)
+      .values(insertEntry)
+      .returning();
+    return entry;
+  }
+
+  async getHabitSummaries(userId: number): Promise<HabitSummary[]> {
+    const userHabits = await this.getHabits(userId);
+    const today = new Date().toISOString().split('T')[0];
+    const todayEntries = await this.getHabitEntriesForDate(userId, today);
+    
+    return userHabits.map(habit => {
+      const habitEntries = todayEntries.filter(entry => entry.habitName === habit.name);
+      const checkIns = habitEntries.filter(entry => entry.action === "Check-in");
+      const checkOuts = habitEntries.filter(entry => entry.action === "Check-out");
+      
+      let totalMinutes = 0;
+      let isActive = false;
+      let activeSessionStart: string | undefined;
+
+      if (habit.checkoutEnabled) {
+        totalMinutes = checkOuts.reduce((sum, entry) => sum + (entry.duration || 0), 0);
+        isActive = checkIns.length > checkOuts.length;
+        if (isActive && checkIns.length > 0) {
+          activeSessionStart = checkIns[checkIns.length - 1].time;
+        }
+      } else {
+        totalMinutes = checkIns.length * 5;
+      }
+
+      return {
+        habitId: habit.id,
+        habitName: habit.name,
+        icon: habit.icon,
+        color: habit.color,
+        totalMinutes,
+        streak: 0, // Will implement streak calculation separately
+        isActive,
+        activeSessionStart
+      };
+    });
+  }
+
+  async getDailyProgress(userId: number, days: number): Promise<DailyProgress[]> {
+    const result: DailyProgress[] = [];
+    const today = new Date();
+    
+    for (let i = 0; i < days; i++) {
+      const checkDate = new Date(today);
+      checkDate.setDate(today.getDate() - i);
+      const dateStr = checkDate.toISOString().split('T')[0];
+      
+      const dayEntries = await this.getHabitEntriesForDate(userId, dateStr);
+      const userHabits = await this.getHabits(userId);
+      
+      const habitProgress = userHabits.map(habit => {
+        const habitEntries = dayEntries.filter(entry => entry.habitName === habit.name);
+        let totalMinutes = 0;
+        
+        if (habit.checkoutEnabled) {
+          totalMinutes = habitEntries
+            .filter(entry => entry.action === "Check-out")
+            .reduce((sum, entry) => sum + (entry.duration || 0), 0);
+        } else {
+          totalMinutes = habitEntries.filter(entry => entry.action === "Check-in").length * 5;
+        }
+        
+        return {
+          habitId: habit.id,
+          habitName: habit.name,
+          totalMinutes,
+          sessions: habitEntries.filter(entry => entry.action === "Check-in").length
+        };
+      });
+      
+      result.push({
+        date: dateStr,
+        habits: habitProgress
+      });
+    }
+    
+    return result.reverse();
+  }
+
+  async getWeeklyProgress(userId: number): Promise<{ habitId: number; habitName: string; totalMinutes: number; color: string }[]> {
+    const weekStart = new Date();
+    weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    
+    const startDate = weekStart.toISOString().split('T')[0];
+    const endDate = weekEnd.toISOString().split('T')[0];
+    
+    const weekEntries = await this.getHabitEntriesForDateRange(userId, startDate, endDate);
+    const userHabits = await this.getHabits(userId);
+    
+    return userHabits.map(habit => {
+      const habitEntries = weekEntries.filter(entry => entry.habitName === habit.name);
+      let totalMinutes = 0;
+      
+      if (habit.checkoutEnabled) {
+        totalMinutes = habitEntries
+          .filter(entry => entry.action === "Check-out")
+          .reduce((sum, entry) => sum + (entry.duration || 0), 0);
+      } else {
+        totalMinutes = habitEntries.filter(entry => entry.action === "Check-in").length * 5;
+      }
+      
+      return {
+        habitId: habit.id,
+        habitName: habit.name,
+        totalMinutes,
+        color: habit.color
+      };
+    });
+  }
+
+  async getSettings(userId: number): Promise<Settings | undefined> {
+    const [userSettings] = await db.select().from(settings).where(eq(settings.userId, userId));
+    return userSettings || undefined;
+  }
+
+  async updateSettings(userId: number, updateData: Partial<InsertSettings>): Promise<Settings> {
+    const existingSettings = await this.getSettings(userId);
+    
+    if (!existingSettings) {
+      const [newSettings] = await db
+        .insert(settings)
+        .values({ ...updateData, userId })
+        .returning();
+      return newSettings;
+    } else {
+      const [updatedSettings] = await db
+        .update(settings)
+        .set(updateData)
+        .where(eq(settings.userId, userId))
+        .returning();
+      return updatedSettings;
+    }
+  }
+}
+
+export const storage = new DatabaseStorage();

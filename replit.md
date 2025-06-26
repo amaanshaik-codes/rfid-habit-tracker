@@ -63,9 +63,10 @@ This is a full-stack RFID habit tracking application built with React frontend a
 6. **UI Update**: Frontend updates using React Query cache invalidation
 
 ### Storage Layer
-- **Production**: PostgreSQL database via Neon
-- **Development**: Memory storage implementation for testing
-- **Interface**: IStorage interface allows switching between implementations
+- **Database**: PostgreSQL with Drizzle ORM (connected and active)
+- **Implementation**: DatabaseStorage class with full CRUD operations
+- **Initialization**: Automatic database seeding with sample habits and RFID cards
+- **Interface**: IStorage interface ensures consistent data access patterns
 
 ## External Dependencies
 
@@ -111,7 +112,8 @@ This is a full-stack RFID habit tracking application built with React frontend a
 - `NODE_ENV`: Environment mode (development/production)
 
 ## Changelog
-- June 26, 2025. Initial setup
+- June 26, 2025: Initial setup with glassmorphism UI and memory storage
+- June 26, 2025: Added PostgreSQL database with Drizzle ORM integration
 
 ## User Preferences
 
