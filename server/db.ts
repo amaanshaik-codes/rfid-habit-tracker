@@ -1,15 +1,52 @@
-import { Pool, neonConfig } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-serverless';
-import ws from "ws";
-import * as schema from "@shared/schema";
+import { google } from 'googleapis';
+import { readFileSync } from 'fs';
+import path from 'path';
 
-neonConfig.webSocketConstructor = ws;
+// Path to your Google service account credentials file
+const CREDENTIALS_PATH = path.join(process.cwd(), 'credentials.json');
 
-if (!process.env.DATABASE_URL) {
-  throw new Error(
-    "DATABASE_URL must be set. Did you forget to provision a database?",
-  );
+// Load client secrets from a local file.
+const credentials = JSON.parse(readFileSync(CREDENTIALS_PATH, 'utf8'));
+
+// Use read/write scope for appending data
+const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
+const auth = new google.auth.GoogleAuth({
+  credentials,
+  scopes: SCOPES,
+});
+
+const sheets = google.sheets({ version: 'v4', auth });
+
+const spreadsheetId = '1kg47tBzBSdw7QLjqTkCPHI6dNsHikSt0nr9x7KUlW3E';
+
+export async function getSheetData(range = 'Sheet1!A1:Z1000') {
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range,
+  });
+  return res.data.values;
 }
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-export const db = drizzle({ client: pool, schema });
+export async function appendSheetData(headers: string[], values: any[], range: string) {
+  // Optionally write headers if this is the first row
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range,
+    valueInputOption: 'RAW',
+    requestBody: {
+      values: [headers],
+    },
+  });
+
+  // Append the actual data
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range,
+    valueInputOption: 'RAW',
+    requestBody: {
+      values: [values],
+    },
+  });
+}
+
+export const db = { getSheetData, appendSheetData };
